@@ -7,6 +7,7 @@ import {
   StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/configure-app';
 
 describe('HealthController (e2e)', () => {
   let container: StartedPostgreSqlContainer;
@@ -27,6 +28,7 @@ describe('HealthController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    configureApp(app);
     await app.init();
   });
 

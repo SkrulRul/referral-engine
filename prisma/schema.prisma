@@ -10,3 +10,27 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Organization {
+  id        String     @id @default(cuid())
+  name      String
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  campaigns Campaign[]
+
+  @@map("organizations")
+}
+
+model Campaign {
+  id             String       @id @default(cuid())
+  name           String
+  startDate      DateTime     @map("start_date")
+  endDate        DateTime     @map("end_date")
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@map("campaigns")
+}
