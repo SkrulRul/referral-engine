@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CampaignService } from './campaign.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Controller({ path: 'campaigns', version: '1' })
 export class CampaignController {
@@ -12,8 +13,8 @@ export class CampaignController {
   }
 
   @Get()
-  findAll() {
-    return this.campaignService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.campaignService.findAll(query);
   }
 
   @Get(':id')

@@ -2,6 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Campaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PaginatedResult } from '../common/dto/paginated-result';
+import { paginate } from '../common/paginate';
 
 const CAMPAIGN_WITH_ORGANIZATION = {
   include: { organization: { select: { id: true, name: true } } },
@@ -29,8 +32,16 @@ export class CampaignService {
     });
   }
 
-  findAll(): Promise<Campaign[]> {
-    return this.prisma.campaign.findMany(CAMPAIGN_WITH_ORGANIZATION);
+  findAll(query: PaginationQueryDto): Promise<PaginatedResult<Campaign>> {
+    return paginate(
+      query,
+      (args) =>
+        this.prisma.campaign.findMany({
+          ...args,
+          ...CAMPAIGN_WITH_ORGANIZATION,
+        }),
+      () => this.prisma.campaign.count(),
+    );
   }
 
   async findOne(id: string): Promise<Campaign> {

@@ -12,6 +12,7 @@ describe('CampaignService', () => {
       create: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      count: jest.Mock;
     };
   };
 
@@ -39,6 +40,7 @@ describe('CampaignService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        count: jest.fn(),
       },
     };
     service = new CampaignService(prisma as unknown as PrismaService);
@@ -67,12 +69,21 @@ describe('CampaignService', () => {
     expect(prisma.campaign.create).not.toHaveBeenCalled();
   });
 
-  it('lists all campaigns with their organization', async () => {
+  it('lists campaigns with their organization and pagination metadata', async () => {
     prisma.campaign.findMany.mockResolvedValue([campaign]);
+    prisma.campaign.count.mockResolvedValue(1);
 
-    const result = await service.findAll();
+    const result = await service.findAll({ page: 1, limit: 20 });
 
-    expect(result).toEqual([campaign]);
+    expect(prisma.campaign.findMany).toHaveBeenCalledWith({
+      skip: 0,
+      take: 20,
+      include: { organization: { select: { id: true, name: true } } },
+    });
+    expect(result).toEqual({
+      data: [campaign],
+      meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
+    });
   });
 
   it('returns a campaign by id', async () => {

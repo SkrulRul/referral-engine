@@ -20,6 +20,11 @@ interface CampaignResponseBody {
   organization: { id: string; name: string };
 }
 
+interface PaginatedResponseBody<T> {
+  data: T[];
+  meta: { total: number; page: number; limit: number; totalPages: number };
+}
+
 describe('Organization + Campaign (e2e)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication<App>;
@@ -56,7 +61,13 @@ describe('Organization + Campaign (e2e)', () => {
 
   describe('/v1 versioning', () => {
     it('resolves organizations under the /v1 prefix', () => {
-      return server().get('/v1/organizations').expect(200).expect([]);
+      return server()
+        .get('/v1/organizations')
+        .expect(200)
+        .expect({
+          data: [],
+          meta: { total: 0, page: 1, limit: 20, totalPages: 0 },
+        });
     });
 
     it('does not resolve organizations without a version prefix', () => {
@@ -86,16 +97,67 @@ describe('Organization + Campaign (e2e)', () => {
     it('rejects an organization with a missing name and creates no partial record', async () => {
       await server().post('/v1/organizations').send({}).expect(400);
 
-      await server().get('/v1/organizations').expect(200).expect([]);
+      const listed = await server().get('/v1/organizations').expect(200);
+      const listedBody =
+        listed.body as PaginatedResponseBody<OrganizationResponseBody>;
+
+      expect(listedBody.data).toEqual([]);
+      expect(listedBody.meta.total).toBe(0);
     });
 
-    it('lists existing organizations', async () => {
+    it('lists existing organizations with pagination metadata', async () => {
       await server().post('/v1/organizations').send({ name: 'Acme Inc' });
       await server().post('/v1/organizations').send({ name: 'Globex Corp' });
 
       const listed = await server().get('/v1/organizations').expect(200);
+      const listedBody =
+        listed.body as PaginatedResponseBody<OrganizationResponseBody>;
 
-      expect(listed.body).toHaveLength(2);
+      expect(listedBody.data).toHaveLength(2);
+      expect(listedBody.meta).toEqual({
+        total: 2,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+    });
+
+    it('paginates organizations using the page and limit query params', async () => {
+      await server().post('/v1/organizations').send({ name: 'Org A' });
+      await server().post('/v1/organizations').send({ name: 'Org B' });
+      await server().post('/v1/organizations').send({ name: 'Org C' });
+
+      const firstPage = await server()
+        .get('/v1/organizations?page=1&limit=2')
+        .expect(200);
+      const firstPageBody =
+        firstPage.body as PaginatedResponseBody<OrganizationResponseBody>;
+
+      expect(firstPageBody.data).toHaveLength(2);
+      expect(firstPageBody.meta).toEqual({
+        total: 3,
+        page: 1,
+        limit: 2,
+        totalPages: 2,
+      });
+
+      const secondPage = await server()
+        .get('/v1/organizations?page=2&limit=2')
+        .expect(200);
+      const secondPageBody =
+        secondPage.body as PaginatedResponseBody<OrganizationResponseBody>;
+
+      expect(secondPageBody.data).toHaveLength(1);
+      expect(secondPageBody.meta).toEqual({
+        total: 3,
+        page: 2,
+        limit: 2,
+        totalPages: 2,
+      });
+    });
+
+    it('rejects an out-of-range limit query param', () => {
+      return server().get('/v1/organizations?limit=101').expect(400);
     });
   });
 
@@ -139,7 +201,12 @@ describe('Organization + Campaign (e2e)', () => {
         })
         .expect(404);
 
-      await server().get('/v1/campaigns').expect(200).expect([]);
+      const listed = await server().get('/v1/campaigns').expect(200);
+      const listedBody =
+        listed.body as PaginatedResponseBody<CampaignResponseBody>;
+
+      expect(listedBody.data).toEqual([]);
+      expect(listedBody.meta.total).toBe(0);
     });
 
     it('rejects a campaign with inverted dates', async () => {
@@ -179,12 +246,19 @@ describe('Organization + Campaign (e2e)', () => {
       });
 
       const listed = await server().get('/v1/campaigns').expect(200);
-      const listedBody = listed.body as CampaignResponseBody[];
+      const listedBody =
+        listed.body as PaginatedResponseBody<CampaignResponseBody>;
 
-      expect(listedBody).toHaveLength(1);
-      expect(listedBody[0]).toMatchObject({
+      expect(listedBody.data).toHaveLength(1);
+      expect(listedBody.data[0]).toMatchObject({
         organizationId,
         organization: { id: organizationId, name: 'Acme Inc' },
+      });
+      expect(listedBody.meta).toEqual({
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
       });
     });
 

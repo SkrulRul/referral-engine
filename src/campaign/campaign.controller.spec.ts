@@ -33,13 +33,17 @@ describe('CampaignController', () => {
     expect(result).toEqual({ id: 'camp_1', ...dto });
   });
 
-  it('delegates findAll to the service', async () => {
-    service.findAll.mockResolvedValue([]);
+  it('delegates findAll to the service with the pagination query', async () => {
+    const paginated = {
+      data: [{ id: 'camp_1', name: 'Referral drive' }],
+      meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
+    };
+    service.findAll.mockResolvedValue(paginated);
 
-    const result = await controller.findAll();
+    const result = await controller.findAll({ page: 1, limit: 20 });
 
-    expect(service.findAll).toHaveBeenCalled();
-    expect(result).toEqual([]);
+    expect(service.findAll).toHaveBeenCalledWith({ page: 1, limit: 20 });
+    expect(result).toEqual(paginated);
   });
 
   it('delegates findOne to the service', async () => {

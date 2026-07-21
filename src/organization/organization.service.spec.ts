@@ -10,6 +10,7 @@ describe('OrganizationService', () => {
       create: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      count: jest.Mock;
     };
   };
 
@@ -26,6 +27,7 @@ describe('OrganizationService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        count: jest.fn(),
       },
     };
     service = new OrganizationService(prisma as unknown as PrismaService);
@@ -42,12 +44,38 @@ describe('OrganizationService', () => {
     expect(result).toEqual(organization);
   });
 
-  it('lists all organizations', async () => {
+  it('lists organizations with pagination metadata', async () => {
     prisma.organization.findMany.mockResolvedValue([organization]);
+    prisma.organization.count.mockResolvedValue(1);
 
-    const result = await service.findAll();
+    const result = await service.findAll({ page: 1, limit: 20 });
 
-    expect(result).toEqual([organization]);
+    expect(prisma.organization.findMany).toHaveBeenCalledWith({
+      skip: 0,
+      take: 20,
+    });
+    expect(result).toEqual({
+      data: [organization],
+      meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
+    });
+  });
+
+  it('computes skip from the requested page', async () => {
+    prisma.organization.findMany.mockResolvedValue([]);
+    prisma.organization.count.mockResolvedValue(45);
+
+    const result = await service.findAll({ page: 3, limit: 20 });
+
+    expect(prisma.organization.findMany).toHaveBeenCalledWith({
+      skip: 40,
+      take: 20,
+    });
+    expect(result.meta).toEqual({
+      total: 45,
+      page: 3,
+      limit: 20,
+      totalPages: 3,
+    });
   });
 
   it('returns an organization by id', async () => {

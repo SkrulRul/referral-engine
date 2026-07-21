@@ -29,13 +29,17 @@ describe('OrganizationController', () => {
     expect(result).toEqual({ id: 'org_1', name: 'Acme Inc' });
   });
 
-  it('delegates findAll to the service', async () => {
-    service.findAll.mockResolvedValue([]);
+  it('delegates findAll to the service with the pagination query', async () => {
+    const paginated = {
+      data: [{ id: 'org_1', name: 'Acme Inc' }],
+      meta: { total: 1, page: 1, limit: 20, totalPages: 1 },
+    };
+    service.findAll.mockResolvedValue(paginated);
 
-    const result = await controller.findAll();
+    const result = await controller.findAll({ page: 1, limit: 20 });
 
-    expect(service.findAll).toHaveBeenCalled();
-    expect(result).toEqual([]);
+    expect(service.findAll).toHaveBeenCalledWith({ page: 1, limit: 20 });
+    expect(result).toEqual(paginated);
   });
 
   it('delegates findOne to the service', async () => {
