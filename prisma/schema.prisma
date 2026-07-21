@@ -30,7 +30,22 @@ model Campaign {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
+  referralCodes  ReferralCode[]
 
   @@index([organizationId])
   @@map("campaigns")
+}
+
+model ReferralCode {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  campaignId    String   @map("campaign_id")
+  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  referrerEmail String   @map("referrer_email")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([campaignId, referrerEmail])
+  @@index([campaignId])
+  @@map("referral_codes")
 }
