@@ -149,7 +149,7 @@ describe('Referral (e2e)', () => {
       await server()
         .post('/v1/referrals')
         .send({
-          referralCode: 'does-not-exist',
+          referralCode: 'zzzzzzzz',
           refereeEmail: 'referee@example.com',
           refereeName: 'Referee Name',
         })

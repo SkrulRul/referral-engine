@@ -3,7 +3,7 @@ import { IsEmail, IsString, Length, MaxLength } from 'class-validator';
 
 export class CreateReferralDto {
   @IsString()
-  @Length(1, 32)
+  @Length(8, 8)
   referralCode!: string;
 
   @IsEmail()
