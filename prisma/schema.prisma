@@ -12,7 +12,7 @@ datasource db {
 }
 
 model Organization {
-  id        String     @id @default(cuid())
+  id        String     @id @default(uuid())
   name      String
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")
@@ -22,7 +22,7 @@ model Organization {
 }
 
 model Campaign {
-  id             String       @id @default(cuid())
+  id             String       @id @default(uuid())
   name           String
   startDate      DateTime     @map("start_date")
   endDate        DateTime     @map("end_date")

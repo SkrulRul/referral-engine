@@ -1,15 +1,12 @@
-import { execSync } from 'node:child_process';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import {
-  PostgreSqlContainer,
-  StartedPostgreSqlContainer,
-} from '@testcontainers/postgresql';
+import { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { startMigratedPostgresContainer } from './support/postgres-test-container';
 
 interface OrganizationResponseBody {
   id: string;
@@ -29,16 +26,7 @@ describe('Organization + Campaign (e2e)', () => {
   let prisma: PrismaService;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:16-alpine').start();
-    const connectionUri = container.getConnectionUri();
-    process.env.DATABASE_URL = connectionUri;
-
-    // Applies the committed migration SQL (not `db push`) so the e2e suite
-    // exercises the real migration, once per suite — never per test.
-    execSync('pnpm prisma migrate deploy', {
-      env: { ...process.env, DATABASE_URL: connectionUri },
-      stdio: 'inherit',
-    });
+    container = await startMigratedPostgresContainer();
   }, 120_000);
 
   afterAll(async () => {

@@ -3,6 +3,7 @@ import {
   ValidationPipe,
   VersioningType,
 } from '@nestjs/common';
+import { AllExceptionsFilter } from './all-exceptions.filter';
 
 export function configureApp(app: INestApplication): void {
   app.useGlobalPipes(
@@ -12,6 +13,7 @@ export function configureApp(app: INestApplication): void {
       transform: true,
     }),
   );
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: '1',
