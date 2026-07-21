@@ -37,15 +37,36 @@ model Campaign {
 }
 
 model ReferralCode {
-  id            String   @id @default(uuid())
-  code          String   @unique
-  campaignId    String   @map("campaign_id")
-  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
-  referrerEmail String   @map("referrer_email")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id            String     @id @default(uuid())
+  code          String     @unique
+  campaignId    String     @map("campaign_id")
+  campaign      Campaign   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  referrerEmail String     @map("referrer_email")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  referrals     Referral[]
 
   @@unique([campaignId, referrerEmail])
   @@index([campaignId])
   @@map("referral_codes")
+}
+
+enum ReferralStatus {
+  pending
+  converted
+}
+
+model Referral {
+  id             String         @id @default(uuid())
+  referralCodeId String         @map("referral_code_id")
+  referralCode   ReferralCode   @relation(fields: [referralCodeId], references: [id], onDelete: Restrict)
+  refereeEmail   String         @map("referee_email")
+  refereeName    String         @map("referee_name")
+  status         ReferralStatus @default(pending)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@unique([referralCodeId, refereeEmail])
+  @@index([referralCodeId])
+  @@map("referrals")
 }

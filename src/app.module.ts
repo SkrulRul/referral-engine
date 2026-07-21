@@ -5,6 +5,7 @@ import { HealthModule } from './health/health.module';
 import { OrganizationModule } from './organization/organization.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { ReferralCodeModule } from './referral-code/referral-code.module';
+import { ReferralModule } from './referral/referral.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ReferralCodeModule } from './referral-code/referral-code.module';
     OrganizationModule,
     CampaignModule,
     ReferralCodeModule,
+    ReferralModule,
   ],
 })
 export class AppModule {}
