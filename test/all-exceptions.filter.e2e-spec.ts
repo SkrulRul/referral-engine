@@ -15,7 +15,7 @@ import { startMigratedPostgresContainer } from './support/postgres-test-containe
 
 // Deliberately throws Prisma errors so the e2e suite can prove
 // AllExceptionsFilter is wired into the real request pipeline, not just
-// exercised as a plain unit under test. Neither P2025 nor P2002 is
+// exercised as a plain unit under test. None of P2025/P2002/P2003 is
 // reachable through actual Organization/Campaign domain logic yet.
 @Controller({ path: '__test-errors', version: VERSION_NEUTRAL })
 class TestErrorsController {
@@ -27,11 +27,19 @@ class TestErrorsController {
     );
   }
 
-  @Get('unmapped')
-  throwUnmapped(): never {
+  @Get('mapped-foreign-key')
+  throwMappedForeignKey(): never {
     throw new Prisma.PrismaClientKnownRequestError(
       'Foreign key constraint failed on the field: `organization_id`',
       { code: 'P2003', clientVersion: '7.8.0' },
+    );
+  }
+
+  @Get('unmapped')
+  throwUnmapped(): never {
+    throw new Prisma.PrismaClientKnownRequestError(
+      'Null constraint violation on the field: `some_internal_field`',
+      { code: 'P2011', clientVersion: '7.8.0' },
     );
   }
 }
@@ -74,6 +82,15 @@ describe('AllExceptionsFilter (e2e)', () => {
       });
   });
 
+  it('maps a Prisma P2003 (foreign key) error to 409 through the real request pipeline', () => {
+    return server()
+      .get('/__test-errors/mapped-foreign-key')
+      .expect(409)
+      .expect((res) => {
+        expect(res.body).toMatchObject({ statusCode: 409 });
+      });
+  });
+
   it('falls back an unmapped Prisma error code to a generic 500, without leaking driver details', () => {
     return server()
       .get('/__test-errors/unmapped')
@@ -83,7 +100,7 @@ describe('AllExceptionsFilter (e2e)', () => {
           statusCode: 500,
           message: 'Internal server error',
         });
-        expect(JSON.stringify(res.body)).not.toContain('organization_id');
+        expect(JSON.stringify(res.body)).not.toContain('some_internal_field');
       });
   });
 });

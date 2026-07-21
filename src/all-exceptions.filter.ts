@@ -6,7 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { HttpAdapterHost } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import { mapPrismaError } from './prisma/prisma-error-mapper';
 
@@ -14,13 +14,21 @@ import { mapPrismaError } from './prisma/prisma-error-mapper';
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost) {
-    const httpException = this.toHttpException(exception);
-    const response = host.switchToHttp().getResponse<Response>();
+  constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
 
-    response
-      .status(httpException.getStatus())
-      .json(httpException.getResponse());
+  catch(exception: unknown, host: ArgumentsHost) {
+    // Resolved here rather than the constructor: the adapter host may not
+    // be available yet at construction time (see Nest's exception filter docs).
+    const { httpAdapter } = this.httpAdapterHost;
+    const response = host.switchToHttp().getResponse<unknown>();
+
+    const httpException = this.toHttpException(exception);
+
+    httpAdapter.reply(
+      response,
+      httpException.getResponse(),
+      httpException.getStatus(),
+    );
   }
 
   private toHttpException(exception: unknown): HttpException {

@@ -24,8 +24,15 @@ describe('mapPrismaError', () => {
     expect(result?.getStatus()).toBe(409);
   });
 
-  it('returns null for an unmapped Prisma error code', () => {
+  it('maps P2003 (foreign key constraint) to ConflictException', () => {
     const result = mapPrismaError(prismaError('P2003'));
+
+    expect(result).toBeInstanceOf(ConflictException);
+    expect(result?.getStatus()).toBe(409);
+  });
+
+  it('returns null for an unmapped Prisma error code', () => {
+    const result = mapPrismaError(prismaError('P2011'));
 
     expect(result).toBeNull();
   });

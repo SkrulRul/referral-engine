@@ -13,6 +13,10 @@ export function mapPrismaError(
       return new NotFoundException('Record not found');
     case 'P2002':
       return new ConflictException('A record with this value already exists');
+    case 'P2003':
+      return new ConflictException(
+        'This operation conflicts with existing related records',
+      );
     default:
       return null;
   }
