@@ -1,98 +1,101 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Referral Engine
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A backend service for running B2B referral programs: create campaigns, issue unique referral codes, capture who signed up through which code, and (upcoming) calculate what each referrer is owed.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Built as a portfolio project to calibrate NestJS (DI, decorators, layered architecture) against prior Spring Boot experience — see [`docs/PRD.md`](docs/PRD.md) for the full product/architecture rationale, including every deliberate scope cut and open decision.
 
-## Description
+## Domain model
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+| Entity | Status | Notes |
+|---|---|---|
+| `Organization` | Implemented | Aggregate root; owns campaigns. No tenant isolation enforced yet (deferred by design, see PRD). |
+| `Campaign` | Implemented | Has a validity window (`startDate`/`endDate`); "active" is derived on read (`CampaignService.isActive()`), not a persisted or cron-managed state. |
+| `ReferralCode` | Implemented | Unique code issued to a Referrer within an active Campaign. Issuance is idempotent per `(campaignId, referrerEmail)` and race-safe under concurrent requests. |
+| `Referral` | Implemented | Records that a Referee registered through a `ReferralCode`. Idempotent per `(referralCodeId, refereeEmail)`, enforced by a DB unique constraint, not an application-level check. Starts `pending`. |
+| `RewardRule` / `Payout` | Not yet implemented | Reward calculation and the `pending → converted → approved → paid` payout lifecycle — Phase 4. |
 
-## Project setup
+## Tech stack
+
+- **NestJS 11** — controller/service/module layering, dependency injection, global `ValidationPipe` (`whitelist` + `forbidNonWhitelisted`) and a single `ExceptionFilter` that maps Prisma errors to a uniform HTTP error shape.
+- **Prisma 7** with `@prisma/adapter-pg`, backed by PostgreSQL. Versioned migrations from the first commit — no `db push`/`synchronize` in any real environment.
+- **`class-validator` / `class-transformer`** for DTO validation and normalization.
+- **Jest + Supertest + Testcontainers** — e2e suites boot a real Nest app against a disposable Postgres container and apply the committed migration SQL, not `db push`.
+- **pnpm**, **Node 24**, TypeScript in `strict` mode.
+
+## Getting started
 
 ```bash
-$ pnpm install
+pnpm install                 # also runs `prisma generate` via postinstall
+cp .env.example .env         # set DATABASE_URL to a real Postgres instance
+pnpm exec prisma migrate dev # apply migrations locally
+pnpm start:dev                # watch mode, http://localhost:3000
 ```
 
-## Compile and run the project
+Optional: seed sample organizations/campaigns/referral codes:
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm seed
 ```
 
-## Run tests
+## API
+
+All routes are versioned under `/v1` (URI versioning). `GET /health` is version-neutral and checks a real Postgres connection via `@nestjs/terminus`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/organizations` | Create an organization |
+| `GET` | `/v1/organizations` | List organizations (paginated) |
+| `GET` | `/v1/organizations/:id` | Fetch one organization |
+| `POST` | `/v1/campaigns` | Create a campaign under an organization |
+| `GET` | `/v1/campaigns` | List campaigns (paginated) |
+| `GET` | `/v1/campaigns/:id` | Fetch one campaign |
+| `POST` | `/v1/referral-codes` | Issue a referral code for a Referrer within an active campaign |
+| `GET` | `/v1/referral-codes/:code` | Look up a referral code and its campaign |
+| `POST` | `/v1/referrals` | Register a Referee against a valid, active referral code |
+| `GET` | `/v1/referrals/:id` | Look up a referral, its status, code, and campaign |
+| `GET` | `/health` | Liveness/readiness (Postgres connectivity) |
+
+## Testing
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm test        # unit tests (src/**/*.spec.ts)
+pnpm test:e2e     # e2e tests against a real Postgres testcontainer
+pnpm test:cov     # unit test coverage
 ```
 
-## Deployment
+CI (`.github/workflows/ci.yml`) runs format check, lint, build, unit tests, and e2e tests on every push to `master` and every pull request.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Project structure
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+```
+src/
+  organization/     # Organization CRUD
+  campaign/          # Campaign CRUD + active-window logic
+  referral-code/     # Referral code issuance and lookup
+  referral/           # Referral capture and lookup
+  common/             # Shared pagination DTOs/helpers
+  prisma/             # PrismaService + Prisma error → HTTP mapping
+  health/             # Liveness/readiness checks
+  all-exceptions.filter.ts  # Global exception filter
+prisma/
+  schema.prisma       # Data model
+  migrations/          # Versioned migrations
+  seed.ts               # Sample data script
+test/
+  *.e2e-spec.ts         # One suite per resource, Testcontainers-backed
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Explicitly deferred (not an oversight)
 
-## Resources
+Per the PRD, the following are conscious, documented cuts — not gaps discovered later:
 
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+- **Fraud/duplicate-person detection** across different referral codes (e.g. the same Referee using multiple codes).
+- **Multi-tenancy enforcement** — `Organization` exists in the model, but no guard/tenant-context scoping yet.
+- **Real authentication/authorization** — no login model for any persona; direction (static per-role API keys) is proposed but not implemented.
+- **Campaign expiration as a background job** — currently a derived read-time check; a scheduled job is a documented open decision.
+- **RewardRule/Payout calculation**, including the transactional guarantees a real payout system needs.
+- **Rate limiting** and **real metrics/APM** — declared as known technical debt.
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Private, unlicensed portfolio project.
