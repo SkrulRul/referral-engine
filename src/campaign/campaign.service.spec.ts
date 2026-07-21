@@ -99,4 +99,49 @@ describe('CampaignService', () => {
 
     await expect(service.findOne('missing')).rejects.toThrow(NotFoundException);
   });
+
+  describe('isActive', () => {
+    // Falls inside the fixture campaign's window (2026-01-01 .. 2026-01-31).
+    const referenceDate = new Date('2026-01-15T00:00:00.000Z');
+
+    it('returns true when the reference date falls within the campaign window', () => {
+      expect(service.isActive(campaign, referenceDate)).toBe(true);
+    });
+
+    it('returns false when the reference date is before the campaign starts', () => {
+      expect(
+        service.isActive(
+          {
+            ...campaign,
+            startDate: new Date('2026-02-01T00:00:00.000Z'),
+            endDate: new Date('2026-02-28T00:00:00.000Z'),
+          },
+          referenceDate,
+        ),
+      ).toBe(false);
+    });
+
+    it('returns false when the reference date is after the campaign ends', () => {
+      expect(
+        service.isActive(
+          {
+            ...campaign,
+            startDate: new Date('2026-01-01T00:00:00.000Z'),
+            endDate: new Date('2026-01-10T00:00:00.000Z'),
+          },
+          referenceDate,
+        ),
+      ).toBe(false);
+    });
+
+    it('defaults the reference date to now when none is provided', () => {
+      const activeCampaign = {
+        ...campaign,
+        startDate: new Date(Date.now() - 1000),
+        endDate: new Date(Date.now() + 1000),
+      };
+
+      expect(service.isActive(activeCampaign)).toBe(true);
+    });
+  });
 });

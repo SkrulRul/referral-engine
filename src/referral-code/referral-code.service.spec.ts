@@ -16,7 +16,7 @@ describe('ReferralCodeService', () => {
       findUnique: jest.Mock;
     };
   };
-  let campaignService: { findOne: jest.Mock };
+  let campaignService: { findOne: jest.Mock; isActive: jest.Mock };
 
   const createDto: CreateReferralCodeDto = {
     campaignId: 'camp_1',
@@ -49,7 +49,7 @@ describe('ReferralCodeService', () => {
         findUnique: jest.fn(),
       },
     };
-    campaignService = { findOne: jest.fn() };
+    campaignService = { findOne: jest.fn(), isActive: jest.fn() };
     service = new ReferralCodeService(
       prisma as unknown as PrismaService,
       campaignService as unknown as CampaignService,
@@ -59,6 +59,7 @@ describe('ReferralCodeService', () => {
   describe('create', () => {
     it('returns the referral code resolved by upsert, whether newly created or already existing', async () => {
       campaignService.findOne.mockResolvedValue(activeCampaign);
+      campaignService.isActive.mockReturnValue(true);
       prisma.referralCode.upsert.mockResolvedValue(referralCode);
 
       const result = await service.create(createDto);
@@ -72,6 +73,7 @@ describe('ReferralCodeService', () => {
 
     it('retries with a new code when the upsert hits a code collision', async () => {
       campaignService.findOne.mockResolvedValue(activeCampaign);
+      campaignService.isActive.mockReturnValue(true);
 
       const collisionError = new Prisma.PrismaClientKnownRequestError(
         'Unique constraint failed',
@@ -104,23 +106,9 @@ describe('ReferralCodeService', () => {
       expect(result).toEqual(referralCode);
     });
 
-    it('throws UnprocessableEntityException when the campaign has not started yet', async () => {
-      campaignService.findOne.mockResolvedValue({
-        ...activeCampaign,
-        startDate: new Date('3000-01-01T00:00:00.000Z'),
-      });
-
-      await expect(service.create(createDto)).rejects.toThrow(
-        UnprocessableEntityException,
-      );
-      expect(prisma.referralCode.upsert).not.toHaveBeenCalled();
-    });
-
-    it('throws UnprocessableEntityException when the campaign has already ended', async () => {
-      campaignService.findOne.mockResolvedValue({
-        ...activeCampaign,
-        endDate: new Date('2000-01-01T00:00:00.000Z'),
-      });
+    it('throws UnprocessableEntityException when the campaign is not active', async () => {
+      campaignService.findOne.mockResolvedValue(activeCampaign);
+      campaignService.isActive.mockReturnValue(false);
 
       await expect(service.create(createDto)).rejects.toThrow(
         UnprocessableEntityException,

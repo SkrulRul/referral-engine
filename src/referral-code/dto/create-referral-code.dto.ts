@@ -1,12 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { IsEmail, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateReferralCodeDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsUUID()
   campaignId!: string;
 
   @IsEmail()
+  @MaxLength(254)
   @Transform(({ value }: { value: string }) => value.trim().toLowerCase())
   referrerEmail!: string;
 }

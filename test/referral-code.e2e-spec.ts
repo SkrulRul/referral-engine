@@ -172,10 +172,39 @@ describe('ReferralCode (e2e)', () => {
       await server()
         .post('/v1/referral-codes')
         .send({
-          campaignId: 'does-not-exist',
+          campaignId: '00000000-0000-0000-0000-000000000000',
           referrerEmail: 'referrer@example.com',
         })
         .expect(404);
+
+      const count = await prisma.referralCode.count();
+      expect(count).toBe(0);
+    });
+
+    it('rejects a malformed campaignId and creates no partial record', async () => {
+      await server()
+        .post('/v1/referral-codes')
+        .send({
+          campaignId: 'not-a-uuid',
+          referrerEmail: 'referrer@example.com',
+        })
+        .expect(400);
+
+      const count = await prisma.referralCode.count();
+      expect(count).toBe(0);
+    });
+
+    it('rejects a referrerEmail over 254 characters and creates no partial record', async () => {
+      const campaign = await createActiveCampaign();
+      const overlongLocalPart = 'a'.repeat(255 - '@example.com'.length + 1);
+
+      await server()
+        .post('/v1/referral-codes')
+        .send({
+          campaignId: campaign.id,
+          referrerEmail: `${overlongLocalPart}@example.com`,
+        })
+        .expect(400);
 
       const count = await prisma.referralCode.count();
       expect(count).toBe(0);

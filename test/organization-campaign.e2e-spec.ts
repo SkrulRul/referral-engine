@@ -159,6 +159,13 @@ describe('Organization + Campaign (e2e)', () => {
     it('rejects an out-of-range limit query param', () => {
       return server().get('/v1/organizations?limit=101').expect(400);
     });
+
+    it('rejects an organization with a name over 255 characters', async () => {
+      await server()
+        .post('/v1/organizations')
+        .send({ name: 'a'.repeat(256) })
+        .expect(400);
+    });
   });
 
   describe('campaigns', () => {
@@ -197,7 +204,7 @@ describe('Organization + Campaign (e2e)', () => {
           name: 'Referral drive',
           startDate: '2026-01-01T00:00:00.000Z',
           endDate: '2026-01-31T00:00:00.000Z',
-          organizationId: 'does-not-exist',
+          organizationId: '00000000-0000-0000-0000-000000000000',
         })
         .expect(404);
 
@@ -207,6 +214,39 @@ describe('Organization + Campaign (e2e)', () => {
 
       expect(listedBody.data).toEqual([]);
       expect(listedBody.meta.total).toBe(0);
+    });
+
+    it('rejects a campaign with a malformed organizationId and creates no partial record', async () => {
+      await server()
+        .post('/v1/campaigns')
+        .send({
+          name: 'Referral drive',
+          startDate: '2026-01-01T00:00:00.000Z',
+          endDate: '2026-01-31T00:00:00.000Z',
+          organizationId: 'not-a-uuid',
+        })
+        .expect(400);
+
+      const listed = await server().get('/v1/campaigns').expect(200);
+      const listedBody =
+        listed.body as PaginatedResponseBody<CampaignResponseBody>;
+
+      expect(listedBody.data).toEqual([]);
+      expect(listedBody.meta.total).toBe(0);
+    });
+
+    it('rejects a campaign with a name over 255 characters', async () => {
+      const organizationId = await createOrganization('Acme Inc');
+
+      await server()
+        .post('/v1/campaigns')
+        .send({
+          name: 'a'.repeat(256),
+          startDate: '2026-01-01T00:00:00.000Z',
+          endDate: '2026-01-31T00:00:00.000Z',
+          organizationId,
+        })
+        .expect(400);
     });
 
     it('rejects a campaign with inverted dates', async () => {

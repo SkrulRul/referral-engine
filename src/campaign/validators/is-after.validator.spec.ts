@@ -5,7 +5,7 @@ import { CreateCampaignDto } from '../dto/create-campaign.dto';
 async function validateDates(startDate: unknown, endDate: unknown) {
   const dto = plainToInstance(CreateCampaignDto, {
     name: 'Referral drive',
-    organizationId: 'org_1',
+    organizationId: '00000000-0000-0000-0000-000000000000',
     startDate,
     endDate,
   });

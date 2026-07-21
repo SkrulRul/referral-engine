@@ -56,4 +56,13 @@ export class CampaignService {
 
     return campaign;
   }
+
+  isActive(
+    campaign: Pick<Campaign, 'startDate' | 'endDate'>,
+    referenceDate: Date = new Date(),
+  ): boolean {
+    return (
+      referenceDate >= campaign.startDate && referenceDate <= campaign.endDate
+    );
+  }
 }

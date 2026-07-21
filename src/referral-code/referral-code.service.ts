@@ -26,8 +26,7 @@ export class ReferralCodeService {
   async create(dto: CreateReferralCodeDto): Promise<ReferralCode> {
     const campaign = await this.campaignService.findOne(dto.campaignId);
 
-    const now = new Date();
-    if (now < campaign.startDate || now > campaign.endDate) {
+    if (!this.campaignService.isActive(campaign)) {
       throw new UnprocessableEntityException(
         'Campaign is not currently active',
       );
