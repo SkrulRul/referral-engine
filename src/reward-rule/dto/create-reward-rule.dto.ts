@@ -9,7 +9,7 @@ export class CreateRewardRuleDto {
   @IsEnum(RewardType)
   type!: RewardType;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsValidRewardValue('type')
   value!: number;
 }

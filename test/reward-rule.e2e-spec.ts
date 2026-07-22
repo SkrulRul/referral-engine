@@ -192,6 +192,31 @@ describe('RewardRule (e2e)', () => {
         .send({ campaignId: campaign.id, type: 'percentage', value: 100 })
         .expect(201);
     });
+
+    it('rejects a value with more than 2 decimal places and creates no row', async () => {
+      const campaign = await createActiveCampaign();
+
+      await server()
+        .post('/v1/reward-rules')
+        .send({ campaignId: campaign.id, type: 'fixed', value: 10.12346 })
+        .expect(400);
+
+      const count = await prisma.rewardRule.count({
+        where: { campaignId: campaign.id },
+      });
+      expect(count).toBe(0);
+    });
+
+    it('accepts a value with exactly 2 decimal places', async () => {
+      const campaign = await createActiveCampaign();
+
+      const created = await server()
+        .post('/v1/reward-rules')
+        .send({ campaignId: campaign.id, type: 'fixed', value: 10.12 })
+        .expect(201);
+
+      expect(created.body).toMatchObject({ value: '10.12' });
+    });
   });
 
   describe('GET /v1/reward-rules/campaign/:campaignId', () => {
