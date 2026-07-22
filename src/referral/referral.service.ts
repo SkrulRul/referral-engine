@@ -8,6 +8,7 @@ import {
   PayoutStatus,
   Referral,
   ReferralStatus,
+  RewardRule,
   RewardType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -115,27 +116,34 @@ export class ReferralService {
         );
       }
 
-      await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.referral.updateMany({
-          where: { id, status: ReferralStatus.pending },
-          data: { status: ReferralStatus.converted },
-        });
-
-        if (updated.count > 0) {
-          await tx.payout.create({
-            data: {
-              referralId: id,
-              amount: rewardRule.value,
-              status: PayoutStatus.pending,
-            },
-          });
-        }
-      });
+      await this.applyConversion(id, rewardRule);
     }
 
     return this.prisma.referral.findUniqueOrThrow({
       where: { id },
       ...REFERRAL_WITH_CODE_CAMPAIGN_AND_PAYOUT,
+    });
+  }
+
+  private async applyConversion(
+    id: string,
+    rewardRule: RewardRule,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.referral.updateMany({
+        where: { id, status: ReferralStatus.pending },
+        data: { status: ReferralStatus.converted },
+      });
+
+      if (updated.count > 0) {
+        await tx.payout.create({
+          data: {
+            referralId: id,
+            amount: rewardRule.value,
+            status: PayoutStatus.pending,
+          },
+        });
+      }
     });
   }
 
