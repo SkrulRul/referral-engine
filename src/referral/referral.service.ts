@@ -3,7 +3,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Referral } from '@prisma/client';
+import {
+  Payout,
+  PayoutStatus,
+  Referral,
+  ReferralStatus,
+  RewardType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignService } from '../campaign/campaign.service';
 import { ReferralCodeService } from '../referral-code/referral-code.service';
@@ -18,6 +24,13 @@ const REFERRAL_WITH_CODE_AND_CAMPAIGN = {
         campaign: { select: { id: true, name: true } },
       },
     },
+  },
+} as const;
+
+const REFERRAL_WITH_CODE_CAMPAIGN_AND_PAYOUT = {
+  include: {
+    ...REFERRAL_WITH_CODE_AND_CAMPAIGN.include,
+    payout: true,
   },
 } as const;
 
@@ -71,5 +84,79 @@ export class ReferralService {
     }
 
     return referral;
+  }
+
+  async convert(id: string) {
+    const referral = await this.prisma.referral.findUnique({
+      where: { id },
+      include: {
+        referralCode: {
+          include: { campaign: { include: { rewardRule: true } } },
+        },
+      },
+    });
+
+    if (!referral) {
+      throw new NotFoundException(`Referral ${id} not found`);
+    }
+
+    if (referral.status === ReferralStatus.pending) {
+      const rewardRule = referral.referralCode.campaign.rewardRule;
+
+      if (!rewardRule) {
+        throw new UnprocessableEntityException(
+          "Referral's campaign has no reward rule defined",
+        );
+      }
+
+      if (rewardRule.type === RewardType.percentage) {
+        throw new UnprocessableEntityException(
+          'Percentage-based reward calculation is not yet supported',
+        );
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.referral.updateMany({
+          where: { id, status: ReferralStatus.pending },
+          data: { status: ReferralStatus.converted },
+        });
+
+        if (updated.count > 0) {
+          await tx.payout.create({
+            data: {
+              referralId: id,
+              amount: rewardRule.value,
+              status: PayoutStatus.pending,
+            },
+          });
+        }
+      });
+    }
+
+    return this.prisma.referral.findUniqueOrThrow({
+      where: { id },
+      ...REFERRAL_WITH_CODE_CAMPAIGN_AND_PAYOUT,
+    });
+  }
+
+  async findPayout(referralId: string): Promise<Payout> {
+    const referral = await this.prisma.referral.findUnique({
+      where: { id: referralId },
+      select: { id: true },
+    });
+
+    if (!referral) {
+      throw new NotFoundException(`Referral ${referralId} not found`);
+    }
+
+    const payout = await this.prisma.payout.findUnique({
+      where: { referralId },
+    });
+
+    if (!payout) {
+      throw new NotFoundException(`Referral ${referralId} has no payout`);
+    }
+
+    return payout;
   }
 }
