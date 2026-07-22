@@ -6,6 +6,7 @@ import { OrganizationModule } from './organization/organization.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { ReferralCodeModule } from './referral-code/referral-code.module';
 import { ReferralModule } from './referral/referral.module';
+import { RewardRuleModule } from './reward-rule/reward-rule.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ReferralModule } from './referral/referral.module';
     CampaignModule,
     ReferralCodeModule,
     ReferralModule,
+    RewardRuleModule,
   ],
 })
 export class AppModule {}

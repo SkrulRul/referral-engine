@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ReferralService } from './referral.service';
 import { CreateReferralDto } from './dto/create-referral.dto';
 
@@ -14,5 +14,15 @@ export class ReferralController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.referralService.findOne(id);
+  }
+
+  @Patch(':id/convert')
+  convert(@Param('id') id: string) {
+    return this.referralService.convert(id);
+  }
+
+  @Get(':id/payout')
+  findPayout(@Param('id') id: string) {
+    return this.referralService.findPayout(id);
   }
 }

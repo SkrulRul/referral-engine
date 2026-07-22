@@ -31,9 +31,27 @@ model Campaign {
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
   referralCodes  ReferralCode[]
+  rewardRule     RewardRule?
 
   @@index([organizationId])
   @@map("campaigns")
+}
+
+enum RewardType {
+  fixed
+  percentage
+}
+
+model RewardRule {
+  id         String     @id @default(uuid())
+  campaignId String     @unique @map("campaign_id")
+  campaign   Campaign   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  type       RewardType
+  value      Decimal    @db.Decimal(10, 2)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@map("reward_rules")
 }
 
 model ReferralCode {
@@ -65,8 +83,27 @@ model Referral {
   status         ReferralStatus @default(pending)
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
+  payout         Payout?
 
   @@unique([referralCodeId, refereeEmail])
   @@index([referralCodeId])
   @@map("referrals")
+}
+
+enum PayoutStatus {
+  pending
+  approved
+  paid
+}
+
+model Payout {
+  id         String       @id @default(uuid())
+  referralId String       @unique @map("referral_id")
+  referral   Referral     @relation(fields: [referralId], references: [id], onDelete: Restrict)
+  amount     Decimal      @db.Decimal(10, 2)
+  status     PayoutStatus @default(pending)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  @@map("payouts")
 }

@@ -39,6 +39,14 @@ interface ReferralResponseBody {
     code: string;
     campaign: { id: string; name: string };
   };
+  payout?: { id: string; amount: string; status: string } | null;
+}
+
+interface PayoutResponseBody {
+  id: string;
+  referralId: string;
+  amount: string;
+  status: string;
 }
 
 describe('Referral (e2e)', () => {
@@ -64,11 +72,13 @@ describe('Referral (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
-    // FK-safe order: referrals reference referral codes, referral codes
-    // reference campaigns, campaigns reference organizations, all via
-    // onDelete: Restrict.
+    // FK-safe order: payouts reference referrals, referrals reference
+    // referral codes, referral codes and reward rules reference campaigns,
+    // campaigns reference organizations, all via onDelete: Restrict.
+    await prisma.payout.deleteMany();
     await prisma.referral.deleteMany();
     await prisma.referralCode.deleteMany();
+    await prisma.rewardRule.deleteMany();
     await prisma.campaign.deleteMany();
     await prisma.organization.deleteMany();
   });
@@ -115,6 +125,32 @@ describe('Referral (e2e)', () => {
       .send({ campaignId, referrerEmail })
       .expect(201);
     return response.body as ReferralCodeResponseBody;
+  }
+
+  async function createRewardRule(
+    campaignId: string,
+    type: 'fixed' | 'percentage' = 'fixed',
+    value = 50,
+  ): Promise<void> {
+    await server()
+      .post('/v1/reward-rules')
+      .send({ campaignId, type, value })
+      .expect(201);
+  }
+
+  async function createPendingReferral(
+    referralCodeCode: string,
+    refereeEmail = 'referee@example.com',
+  ): Promise<ReferralResponseBody> {
+    const response = await server()
+      .post('/v1/referrals')
+      .send({
+        referralCode: referralCodeCode,
+        refereeEmail,
+        refereeName: 'Referee Name',
+      })
+      .expect(201);
+    return response.body as ReferralResponseBody;
   }
 
   describe('POST /v1/referrals', () => {
@@ -459,6 +495,151 @@ describe('Referral (e2e)', () => {
     it('returns 404 for a referral that does not exist', () => {
       return server()
         .get('/v1/referrals/00000000-0000-0000-0000-000000000000')
+        .expect(404);
+    });
+  });
+
+  describe('PATCH /v1/referrals/:id/convert', () => {
+    it('converts a pending referral and creates a pending payout for a fixed reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      const converted = await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .expect(200);
+
+      const convertedBody = converted.body as ReferralResponseBody;
+      expect(convertedBody.status).toBe('converted');
+      expect(convertedBody.payout).toMatchObject({
+        amount: '75',
+        status: 'pending',
+      });
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(1);
+    });
+
+    it('rejects converting a referral that does not exist', () => {
+      return server()
+        .patch('/v1/referrals/00000000-0000-0000-0000-000000000000/convert')
+        .expect(404);
+    });
+
+    it('rejects converting a referral whose campaign has no reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      await server().patch(`/v1/referrals/${referral.id}/convert`).expect(422);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(0);
+    });
+
+    it('rejects converting a referral under a percentage reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'percentage', 10);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      await server().patch(`/v1/referrals/${referral.id}/convert`).expect(422);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(0);
+    });
+
+    it('does not create a second payout when converting an already-converted referral', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      const first = await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .expect(200);
+      const second = await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .expect(200);
+
+      const firstBody = first.body as ReferralResponseBody;
+      const secondBody = second.body as ReferralResponseBody;
+      expect(secondBody.payout?.id).toEqual(firstBody.payout?.id);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(1);
+    });
+
+    it('creates exactly one payout when concurrent conversion requests race', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      const responses = await Promise.all(
+        Array.from({ length: 10 }, () =>
+          server().patch(`/v1/referrals/${referral.id}/convert`),
+        ),
+      );
+
+      for (const response of responses) {
+        expect(response.status).toBe(200);
+      }
+
+      const payoutIds = new Set(
+        responses.map(
+          (response) => (response.body as ReferralResponseBody).payout?.id,
+        ),
+      );
+      expect(payoutIds.size).toBe(1);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(1);
+    });
+  });
+
+  describe('GET /v1/referrals/:id/payout', () => {
+    it("retrieves a converted referral's payout", async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+      await server().patch(`/v1/referrals/${referral.id}/convert`).expect(200);
+
+      const fetched = await server()
+        .get(`/v1/referrals/${referral.id}/payout`)
+        .expect(200);
+
+      expect(fetched.body).toMatchObject({
+        referralId: referral.id,
+        amount: '75',
+        status: 'pending',
+      } satisfies Partial<PayoutResponseBody>);
+    });
+
+    it('returns 404 for a referral that has not been converted yet', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      await server().get(`/v1/referrals/${referral.id}/payout`).expect(404);
+    });
+
+    it('returns 404 for a referral that does not exist', () => {
+      return server()
+        .get('/v1/referrals/00000000-0000-0000-0000-000000000000/payout')
         .expect(404);
     });
   });
