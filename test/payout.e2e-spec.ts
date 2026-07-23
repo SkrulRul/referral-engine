@@ -6,6 +6,7 @@ import { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { PayoutService } from '../src/payout/payout.service';
 import { startMigratedPostgresContainer } from './support/postgres-test-container';
 
 interface OrganizationResponseBody {
@@ -217,6 +218,10 @@ describe('Payout (e2e)', () => {
           .patch('/v1/payouts/00000000-0000-0000-0000-000000000000/approve')
           .expect(404);
       });
+
+      it('returns 400 for a malformed (non-UUID) id', () => {
+        return server().patch('/v1/payouts/not-a-uuid/approve').expect(400);
+      });
     });
 
     describe('PATCH /v1/payouts/:id/pay', () => {
@@ -265,6 +270,53 @@ describe('Payout (e2e)', () => {
           .patch('/v1/payouts/00000000-0000-0000-0000-000000000000/pay')
           .expect(404);
       });
+
+      it('returns 400 for a malformed (non-UUID) id', () => {
+        return server().patch('/v1/payouts/not-a-uuid/pay').expect(400);
+      });
+    });
+
+    describe('concurrency: scheduled sweep racing a manual pay call', () => {
+      it('is safe when the sweep and several manual pay calls target the same approved payout at once', async () => {
+        const payoutId = await fixtures.createApprovedPayout();
+        const payoutService = app.get(PayoutService);
+
+        const manualPayCalls = Array.from({ length: 5 }, () =>
+          server().patch(`/v1/payouts/${payoutId}/pay`),
+        );
+
+        const [manualPayResponses] = await Promise.all([
+          Promise.all(manualPayCalls),
+          payoutService.sweepApprovedToPaid(),
+        ]);
+
+        for (const response of manualPayResponses) {
+          expect(response.status).toBe(200);
+          expect((response.body as PayoutResponseBody).status).toBe('paid');
+        }
+
+        const fetched = await server()
+          .get(`/v1/payouts/${payoutId}`)
+          .expect(200);
+        const finalBody = fetched.body as PayoutResponseBody;
+        expect(finalBody.status).toBe('paid');
+        expect(finalBody.paidAt).not.toBeNull();
+
+        // No double-processing: the payout row is never duplicated, and every
+        // racing caller converges on the exact same paidAt, proving only one
+        // of the concurrent writers actually performed the transition.
+        const payoutCount = await prisma.payout.count({
+          where: { id: payoutId },
+        });
+        expect(payoutCount).toBe(1);
+
+        const distinctPaidAts = new Set(
+          manualPayResponses.map(
+            (response) => (response.body as PayoutResponseBody).paidAt,
+          ),
+        );
+        expect(distinctPaidAts.size).toBe(1);
+      });
     });
 
     describe('GET /v1/payouts/:id', () => {
@@ -285,6 +337,10 @@ describe('Payout (e2e)', () => {
         return server()
           .get('/v1/payouts/00000000-0000-0000-0000-000000000000')
           .expect(404);
+      });
+
+      it('returns 400 for a malformed (non-UUID) id', () => {
+        return server().get('/v1/payouts/not-a-uuid').expect(400);
       });
     });
   });
