@@ -34,6 +34,7 @@ interface ReferralResponseBody {
   refereeEmail: string;
   refereeName: string;
   status: string;
+  arr?: string | null;
   referralCode: {
     id: string;
     code: string;
@@ -497,6 +498,30 @@ describe('Referral (e2e)', () => {
         .get('/v1/referrals/00000000-0000-0000-0000-000000000000')
         .expect(404);
     });
+
+    it('exposes the arr used for a percentage conversion alongside its payout, for auditability', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'percentage', 12.5);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+      await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .send({ arr: 1234.56 })
+        .expect(200);
+
+      const fetched = await server()
+        .get(`/v1/referrals/${referral.id}`)
+        .expect(200);
+      const fetchedPayout = await server()
+        .get(`/v1/referrals/${referral.id}/payout`)
+        .expect(200);
+
+      const fetchedBody = fetched.body as ReferralResponseBody;
+      expect(fetchedBody.arr).toBe('1234.56');
+      expect(fetchedPayout.body as PayoutResponseBody).toMatchObject({
+        amount: '154.32',
+      });
+    });
   });
 
   describe('PATCH /v1/referrals/:id/convert', () => {
@@ -542,7 +567,32 @@ describe('Referral (e2e)', () => {
       expect(payoutCount).toBe(0);
     });
 
-    it('rejects converting a referral under a percentage reward rule', async () => {
+    it('converts a pending referral and computes the payout from arr for a percentage reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'percentage', 12.5);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      const converted = await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .send({ arr: 1234.56 })
+        .expect(200);
+
+      const convertedBody = converted.body as ReferralResponseBody;
+      expect(convertedBody.status).toBe('converted');
+      expect(convertedBody.arr).toBe('1234.56');
+      expect(convertedBody.payout).toMatchObject({
+        amount: '154.32',
+        status: 'pending',
+      });
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(1);
+    });
+
+    it('rejects converting a referral under a percentage reward rule without an arr', async () => {
       const campaign = await createActiveCampaign();
       await createRewardRule(campaign.id, 'percentage', 10);
       const referralCode = await createReferralCode(campaign.id);
@@ -554,6 +604,60 @@ describe('Referral (e2e)', () => {
         where: { referralId: referral.id },
       });
       expect(payoutCount).toBe(0);
+    });
+
+    it('rejects a negative arr when converting under a percentage reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'percentage', 10);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .send({ arr: -100 })
+        .expect(400);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(0);
+    });
+
+    it('rejects an arr above what the column can store', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'percentage', 10);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .send({ arr: 100000000.0 })
+        .expect(400);
+
+      const payoutCount = await prisma.payout.count({
+        where: { referralId: referral.id },
+      });
+      expect(payoutCount).toBe(0);
+    });
+
+    it('ignores a stray arr when converting under a fixed reward rule', async () => {
+      const campaign = await createActiveCampaign();
+      await createRewardRule(campaign.id, 'fixed', 75);
+      const referralCode = await createReferralCode(campaign.id);
+      const referral = await createPendingReferral(referralCode.code);
+
+      const converted = await server()
+        .patch(`/v1/referrals/${referral.id}/convert`)
+        .send({ arr: 1234.56 })
+        .expect(200);
+
+      const convertedBody = converted.body as ReferralResponseBody;
+      expect(convertedBody.status).toBe('converted');
+      expect(convertedBody.arr).toBeNull();
+      expect(convertedBody.payout).toMatchObject({
+        amount: '75',
+        status: 'pending',
+      });
     });
 
     it('does not create a second payout when converting an already-converted referral', async () => {

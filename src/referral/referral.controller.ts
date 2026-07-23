@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ReferralService } from './referral.service';
 import { CreateReferralDto } from './dto/create-referral.dto';
+import { ConvertReferralDto } from './dto/convert-referral.dto';
 
 @Controller({ path: 'referrals', version: '1' })
 export class ReferralController {
@@ -17,8 +18,8 @@ export class ReferralController {
   }
 
   @Patch(':id/convert')
-  convert(@Param('id') id: string) {
-    return this.referralService.convert(id);
+  convert(@Param('id') id: string, @Body() dto: ConvertReferralDto) {
+    return this.referralService.convert(id, dto);
   }
 
   @Get(':id/payout')

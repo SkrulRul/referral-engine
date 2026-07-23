@@ -81,6 +81,7 @@ model Referral {
   refereeEmail   String         @map("referee_email")
   refereeName    String         @map("referee_name")
   status         ReferralStatus @default(pending)
+  arr            Decimal?       @db.Decimal(10, 2) @map("arr")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
   payout         Payout?

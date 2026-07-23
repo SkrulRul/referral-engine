@@ -51,10 +51,30 @@ export class ReferralCodeService {
           ...REFERRAL_CODE_WITH_CAMPAIGN,
         });
       } catch (error) {
-        if (this.isCodeCollision(error)) {
-          continue;
+        if (
+          !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+          error.code !== 'P2002'
+        ) {
+          throw error;
         }
-        throw error;
+
+        // Either the self-generated `code` collided (retry with a new one)
+        // or a concurrent identical request already created the row for
+        // this campaign+referrer (return it). Re-fetching by the natural
+        // key tells us which, without depending on Prisma/adapter-internal
+        // error shapes to identify the violated constraint.
+        const existing = await this.prisma.referralCode.findUnique({
+          where: {
+            campaignId_referrerEmail: {
+              campaignId: dto.campaignId,
+              referrerEmail: dto.referrerEmail,
+            },
+          },
+          ...REFERRAL_CODE_WITH_CAMPAIGN,
+        });
+        if (existing) {
+          return existing;
+        }
       }
     }
 
@@ -74,28 +94,5 @@ export class ReferralCodeService {
     }
 
     return referralCode;
-  }
-
-  // Under @prisma/adapter-pg, P2002's `meta.target` is undefined; the violated
-  // constraint's columns live at meta.driverAdapterError.cause.constraint.fields.
-  private isCodeCollision(error: unknown): boolean {
-    if (
-      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-      error.code !== 'P2002'
-    ) {
-      return false;
-    }
-
-    const fields = (
-      error.meta as
-        | {
-            driverAdapterError?: {
-              cause?: { constraint?: { fields?: unknown } };
-            };
-          }
-        | undefined
-    )?.driverAdapterError?.cause?.constraint?.fields;
-
-    return Array.isArray(fields) && fields.includes('code');
   }
 }
