@@ -9,13 +9,13 @@ import {
   Prisma,
   Referral,
   ReferralStatus,
-  RewardType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignService } from '../campaign/campaign.service';
 import { ReferralCodeService } from '../referral-code/referral-code.service';
 import { CreateReferralDto } from './dto/create-referral.dto';
 import { ConvertReferralDto } from './dto/convert-referral.dto';
+import { RewardCalculatorRegistry } from './calculators/reward-calculator.registry';
 
 const REFERRAL_WITH_CODE_AND_CAMPAIGN = {
   include: {
@@ -42,6 +42,7 @@ export class ReferralService {
     private readonly prisma: PrismaService,
     private readonly campaignService: CampaignService,
     private readonly referralCodeService: ReferralCodeService,
+    private readonly rewardCalculatorRegistry: RewardCalculatorRegistry,
   ) {}
 
   async register(dto: CreateReferralDto): Promise<Referral> {
@@ -135,25 +136,11 @@ export class ReferralService {
         );
       }
 
-      let amount: Prisma.Decimal;
-      let arr: Prisma.Decimal | undefined;
-
-      if (rewardRule.type === RewardType.percentage) {
-        if (dto.arr === undefined) {
-          throw new UnprocessableEntityException(
-            'ARR is required to convert a referral under a percentage reward rule',
-          );
-        }
-
-        arr = new Prisma.Decimal(dto.arr);
-        // arr's @Max bound (ConvertReferralDto) only fully protects
-        // Payout.amount from overflow because percentage reward values are
-        // separately capped at 100 (IsValidRewardValueConstraint) — if that
-        // cap is ever loosened, arr's max needs re-deriving.
-        amount = arr.mul(rewardRule.value).div(100).toDecimalPlaces(2);
-      } else {
-        amount = rewardRule.value;
-      }
+      const calculator = this.rewardCalculatorRegistry.get(rewardRule.type);
+      const { amount, arr } = calculator.calculate({
+        rewardRule,
+        arr: dto.arr,
+      });
 
       await this.applyConversion(id, amount, arr);
     }

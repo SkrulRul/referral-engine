@@ -1,10 +1,10 @@
-import { UnprocessableEntityException } from '@nestjs/common';
 import { Prisma, ReferralStatus, RewardType } from '@prisma/client';
 import { ReferralService } from './referral.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignService } from '../campaign/campaign.service';
 import { ReferralCodeService } from '../referral-code/referral-code.service';
-import { ConvertReferralDto } from './dto/convert-referral.dto';
+import { RewardCalculatorRegistry } from './calculators/reward-calculator.registry';
+import { RewardCalculationResult } from './calculators/reward-calculator.interface';
 
 interface PayoutCreateArgs {
   data: { referralId: string; amount: Prisma.Decimal; status: string };
@@ -33,6 +33,7 @@ describe('ReferralService', () => {
     };
     $transaction: jest.Mock;
   };
+  let rewardCalculatorRegistry: { get: jest.Mock };
 
   const pendingReferralWithRewardRule = (rewardRule: {
     type: RewardType;
@@ -68,67 +69,84 @@ describe('ReferralService', () => {
           callback(tx),
         ),
     };
+    rewardCalculatorRegistry = { get: jest.fn() };
 
     service = new ReferralService(
       prisma as unknown as PrismaService,
       {} as CampaignService,
       {} as ReferralCodeService,
+      rewardCalculatorRegistry as unknown as RewardCalculatorRegistry,
     );
   });
 
-  describe('convert — percentage reward rule', () => {
-    it('computes the payout as a Decimal percentage of arr, rounded to 2 places', async () => {
+  describe('convert', () => {
+    it("resolves the calculator for the referral's reward rule type", async () => {
+      const rewardRule = {
+        type: RewardType.percentage,
+        value: new Prisma.Decimal(10),
+      };
       prisma.referral.findUnique.mockResolvedValue(
-        pendingReferralWithRewardRule({
-          type: RewardType.percentage,
-          value: new Prisma.Decimal(12.5),
-        }),
+        pendingReferralWithRewardRule(rewardRule),
       );
-      const dto: ConvertReferralDto = { arr: 1234.56 };
+      rewardCalculatorRegistry.get.mockReturnValue({
+        calculate: jest
+          .fn()
+          .mockReturnValue({ amount: new Prisma.Decimal(15) }),
+      });
 
-      await service.convert('referral_1', dto);
+      await service.convert('referral_1', { arr: 150 });
+
+      expect(rewardCalculatorRegistry.get).toHaveBeenCalledWith(
+        RewardType.percentage,
+      );
+    });
+
+    it('persists exactly what the resolved calculator returns', async () => {
+      const rewardRule = {
+        type: RewardType.percentage,
+        value: new Prisma.Decimal(10),
+      };
+      prisma.referral.findUnique.mockResolvedValue(
+        pendingReferralWithRewardRule(rewardRule),
+      );
+      const calculationResult: RewardCalculationResult = {
+        amount: new Prisma.Decimal(154.32),
+        arr: new Prisma.Decimal(1234.56),
+      };
+      rewardCalculatorRegistry.get.mockReturnValue({
+        calculate: jest.fn().mockReturnValue(calculationResult),
+      });
+
+      await service.convert('referral_1', { arr: 1234.56 });
 
       const [payoutArgs] = payoutCreate.mock.calls[0];
       expect(payoutArgs.data.referralId).toBe('referral_1');
-      expect(payoutArgs.data.amount.toString()).toBe('154.32');
+      expect(payoutArgs.data.amount).toBe(calculationResult.amount);
 
       const [referralArgs] = referralUpdateMany.mock.calls[0];
       expect(referralArgs.data.status).toBe(ReferralStatus.converted);
-      expect(referralArgs.data.arr?.toString()).toBe('1234.56');
+      expect(referralArgs.data.arr).toBe(calculationResult.arr);
     });
 
-    it('rejects conversion when arr is missing, without touching the transaction', async () => {
+    it('propagates a calculator exception without touching the transaction', async () => {
+      const rewardRule = {
+        type: RewardType.percentage,
+        value: new Prisma.Decimal(10),
+      };
       prisma.referral.findUnique.mockResolvedValue(
-        pendingReferralWithRewardRule({
-          type: RewardType.percentage,
-          value: new Prisma.Decimal(10),
-        }),
+        pendingReferralWithRewardRule(rewardRule),
       );
+      const calculatorError = new Error('missing arr');
+      rewardCalculatorRegistry.get.mockReturnValue({
+        calculate: jest.fn().mockImplementation(() => {
+          throw calculatorError;
+        }),
+      });
 
       await expect(service.convert('referral_1', {})).rejects.toThrow(
-        UnprocessableEntityException,
+        calculatorError,
       );
       expect(prisma.$transaction).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('convert — fixed reward rule', () => {
-    it('uses the reward rule value directly and ignores a stray arr', async () => {
-      prisma.referral.findUnique.mockResolvedValue(
-        pendingReferralWithRewardRule({
-          type: RewardType.fixed,
-          value: new Prisma.Decimal(75),
-        }),
-      );
-      const dto: ConvertReferralDto = { arr: 1234.56 };
-
-      await service.convert('referral_1', dto);
-
-      const [payoutArgs] = payoutCreate.mock.calls[0];
-      expect(payoutArgs.data.amount.toString()).toBe('75');
-
-      const [referralArgs] = referralUpdateMany.mock.calls[0];
-      expect(referralArgs.data.arr).toBeUndefined();
     });
   });
 });
