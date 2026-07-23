@@ -102,6 +102,8 @@ model Payout {
   referral   Referral     @relation(fields: [referralId], references: [id], onDelete: Restrict)
   amount     Decimal      @db.Decimal(10, 2)
   status     PayoutStatus @default(pending)
+  approvedAt DateTime?    @map("approved_at")
+  paidAt     DateTime?    @map("paid_at")
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
 

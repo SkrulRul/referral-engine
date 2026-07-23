@@ -7,6 +7,7 @@ import { CampaignModule } from './campaign/campaign.module';
 import { ReferralCodeModule } from './referral-code/referral-code.module';
 import { ReferralModule } from './referral/referral.module';
 import { RewardRuleModule } from './reward-rule/reward-rule.module';
+import { PayoutModule } from './payout/payout.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RewardRuleModule } from './reward-rule/reward-rule.module';
     ReferralCodeModule,
     ReferralModule,
     RewardRuleModule,
+    PayoutModule,
   ],
 })
 export class AppModule {}
