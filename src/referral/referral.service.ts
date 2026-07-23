@@ -6,15 +6,16 @@ import {
 import {
   Payout,
   PayoutStatus,
+  Prisma,
   Referral,
   ReferralStatus,
-  RewardRule,
-  RewardType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignService } from '../campaign/campaign.service';
 import { ReferralCodeService } from '../referral-code/referral-code.service';
 import { CreateReferralDto } from './dto/create-referral.dto';
+import { ConvertReferralDto } from './dto/convert-referral.dto';
+import { RewardCalculatorRegistry } from './calculators/reward-calculator.registry';
 
 const REFERRAL_WITH_CODE_AND_CAMPAIGN = {
   include: {
@@ -41,6 +42,7 @@ export class ReferralService {
     private readonly prisma: PrismaService,
     private readonly campaignService: CampaignService,
     private readonly referralCodeService: ReferralCodeService,
+    private readonly rewardCalculatorRegistry: RewardCalculatorRegistry,
   ) {}
 
   async register(dto: CreateReferralDto): Promise<Referral> {
@@ -57,21 +59,45 @@ export class ReferralService {
       );
     }
 
-    return this.prisma.referral.upsert({
-      where: {
-        referralCodeId_refereeEmail: {
+    try {
+      return await this.prisma.referral.upsert({
+        where: {
+          referralCodeId_refereeEmail: {
+            referralCodeId: referralCode.id,
+            refereeEmail: dto.refereeEmail,
+          },
+        },
+        update: {},
+        create: {
           referralCodeId: referralCode.id,
           refereeEmail: dto.refereeEmail,
+          refereeName: dto.refereeName,
         },
-      },
-      update: {},
-      create: {
-        referralCodeId: referralCode.id,
-        refereeEmail: dto.refereeEmail,
-        refereeName: dto.refereeName,
-      },
-      ...REFERRAL_WITH_CODE_AND_CAMPAIGN,
-    });
+        ...REFERRAL_WITH_CODE_AND_CAMPAIGN,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== 'P2002'
+      ) {
+        throw error;
+      }
+
+      // The only unique constraint this upsert can race on is
+      // (referralCodeId, refereeEmail) — caller-supplied identity that
+      // register() cannot change, unlike referral-code's self-generated
+      // `code`. A concurrent identical request already created the row, so
+      // a single re-fetch (not a retry loop) is guaranteed to find it.
+      return this.prisma.referral.findUniqueOrThrow({
+        where: {
+          referralCodeId_refereeEmail: {
+            referralCodeId: referralCode.id,
+            refereeEmail: dto.refereeEmail,
+          },
+        },
+        ...REFERRAL_WITH_CODE_AND_CAMPAIGN,
+      });
+    }
   }
 
   async findOne(id: string): Promise<Referral> {
@@ -87,7 +113,7 @@ export class ReferralService {
     return referral;
   }
 
-  async convert(id: string) {
+  async convert(id: string, dto: ConvertReferralDto) {
     const referral = await this.prisma.referral.findUnique({
       where: { id },
       include: {
@@ -110,13 +136,13 @@ export class ReferralService {
         );
       }
 
-      if (rewardRule.type === RewardType.percentage) {
-        throw new UnprocessableEntityException(
-          'Percentage-based reward calculation is not yet supported',
-        );
-      }
+      const calculator = this.rewardCalculatorRegistry.get(rewardRule.type);
+      const { amount, arr } = calculator.calculate({
+        rewardRule,
+        arr: dto.arr,
+      });
 
-      await this.applyConversion(id, rewardRule);
+      await this.applyConversion(id, amount, arr);
     }
 
     return this.prisma.referral.findUniqueOrThrow({
@@ -127,19 +153,20 @@ export class ReferralService {
 
   private async applyConversion(
     id: string,
-    rewardRule: RewardRule,
+    amount: Prisma.Decimal,
+    arr?: Prisma.Decimal,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const updated = await tx.referral.updateMany({
         where: { id, status: ReferralStatus.pending },
-        data: { status: ReferralStatus.converted },
+        data: { status: ReferralStatus.converted, arr },
       });
 
       if (updated.count > 0) {
         await tx.payout.create({
           data: {
             referralId: id,
-            amount: rewardRule.value,
+            amount,
             status: PayoutStatus.pending,
           },
         });
