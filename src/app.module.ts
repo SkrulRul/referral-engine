@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
@@ -8,6 +8,7 @@ import { ReferralCodeModule } from './referral-code/referral-code.module';
 import { ReferralModule } from './referral/referral.module';
 import { RewardRuleModule } from './reward-rule/reward-rule.module';
 import { PayoutModule } from './payout/payout.module';
+import { CorrelationIdMiddleware } from './logging/correlation-id.middleware';
 
 @Module({
   imports: [
@@ -22,4 +23,8 @@ import { PayoutModule } from './payout/payout.module';
     PayoutModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}
