@@ -12,13 +12,27 @@ datasource db {
 }
 
 model Organization {
-  id        String     @id @default(uuid())
-  name      String
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
-  campaigns Campaign[]
+  id            String         @id @default(uuid())
+  name          String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  campaigns     Campaign[]
+  programAdmins ProgramAdmin[]
 
   @@map("organizations")
+}
+
+model ProgramAdmin {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String       @map("password_hash")
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@map("program_admins")
 }
 
 model Campaign {

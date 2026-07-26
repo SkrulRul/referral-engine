@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { nanoid } from 'nanoid';
+import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({
@@ -19,12 +20,31 @@ async function main() {
   console.log('Clearing existing data...');
   await prisma.referralCode.deleteMany();
   await prisma.campaign.deleteMany();
+  await prisma.programAdmin.deleteMany();
   await prisma.organization.deleteMany();
 
   console.log('Seeding organizations and campaigns...');
   const acme = await prisma.organization.create({ data: { name: 'Acme Inc' } });
   const globex = await prisma.organization.create({
     data: { name: 'Globex Corp' },
+  });
+
+  console.log('Seeding program admins...');
+  // dev password: 'devpassword123' — local/e2e seed data only, never a real secret
+  const passwordHash = await bcrypt.hash('devpassword123', 10);
+  await prisma.programAdmin.create({
+    data: {
+      email: 'admin@acme-customer.com',
+      passwordHash,
+      organizationId: acme.id,
+    },
+  });
+  await prisma.programAdmin.create({
+    data: {
+      email: 'admin@globex-partner.com',
+      passwordHash,
+      organizationId: globex.id,
+    },
   });
 
   const acmeActiveCampaign = await prisma.campaign.create({
@@ -87,6 +107,7 @@ async function main() {
 
   console.log('Seed complete:', {
     organizations: 2,
+    programAdmins: 2,
     campaigns: 4,
     referralCodes: referrerEmailsByCampaign.reduce(
       (total, { emails }) => total + emails.length,
