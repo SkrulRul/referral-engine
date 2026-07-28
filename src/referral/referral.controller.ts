@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { ReferralService } from './referral.service';
 import { CreateReferralDto } from './dto/create-referral.dto';
 import { ConvertReferralDto } from './dto/convert-referral.dto';
@@ -7,6 +16,7 @@ import { ConvertReferralDto } from './dto/convert-referral.dto';
 export class ReferralController {
   constructor(private readonly referralService: ReferralService) {}
 
+  @UseGuards(ThrottlerGuard)
   @Post()
   register(@Body() dto: CreateReferralDto) {
     return this.referralService.register(dto);
