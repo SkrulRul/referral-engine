@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { startMigratedPostgresContainer } from './support/postgres-test-container';
+import { createAuthenticatedProgramAdmin } from './support/auth-test-helper';
 
 interface OrganizationResponseBody {
   id: string;
@@ -29,6 +30,7 @@ describe('Organization + Campaign (e2e)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let accessToken: string;
 
   beforeAll(async () => {
     container = await startMigratedPostgresContainer();
@@ -50,7 +52,27 @@ describe('Organization + Campaign (e2e)', () => {
     prisma = app.get(PrismaService);
     // FK-safe order: campaigns reference organizations via onDelete: Restrict.
     await prisma.campaign.deleteMany();
+    await prisma.programAdmin.deleteMany();
     await prisma.organization.deleteMany();
+
+    const authOrg = await prisma.organization.create({
+      data: { name: 'Auth Org' },
+    });
+    const authenticated = await createAuthenticatedProgramAdmin(
+      app,
+      prisma,
+      authOrg.id,
+    );
+    accessToken = authenticated.accessToken;
+
+    // This spec asserts exact organization listings/pagination, so the
+    // auth-only org and admin must not linger as visible rows. The JWT
+    // itself is stateless (no DB lookup on verification), so deleting them
+    // here leaves accessToken valid for the rest of the test.
+    await prisma.programAdmin.delete({
+      where: { id: authenticated.programAdminId },
+    });
+    await prisma.organization.delete({ where: { id: authOrg.id } });
   });
 
   afterEach(async () => {
@@ -58,6 +80,11 @@ describe('Organization + Campaign (e2e)', () => {
   });
 
   const server = () => request(app.getHttpServer());
+  const authenticatedServer = () =>
+    request
+      .agent(app.getHttpServer())
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Connection', 'close');
 
   describe('/v1 versioning', () => {
     it('resolves organizations under the /v1 prefix', () => {
@@ -180,7 +207,7 @@ describe('Organization + Campaign (e2e)', () => {
     it('creates a campaign linked to its organization', async () => {
       const organizationId = await createOrganization('Acme Inc');
 
-      const created = await server()
+      const created = await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           name: 'Referral drive',
@@ -198,7 +225,7 @@ describe('Organization + Campaign (e2e)', () => {
     });
 
     it('rejects a campaign for a nonexistent organization and creates no partial record', async () => {
-      await server()
+      await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           name: 'Referral drive',
@@ -217,7 +244,7 @@ describe('Organization + Campaign (e2e)', () => {
     });
 
     it('rejects a campaign with a malformed organizationId and creates no partial record', async () => {
-      await server()
+      await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           name: 'Referral drive',
@@ -238,7 +265,7 @@ describe('Organization + Campaign (e2e)', () => {
     it('rejects a campaign with a name over 255 characters', async () => {
       const organizationId = await createOrganization('Acme Inc');
 
-      await server()
+      await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           name: 'a'.repeat(256),
@@ -252,7 +279,7 @@ describe('Organization + Campaign (e2e)', () => {
     it('rejects a campaign with inverted dates', async () => {
       const organizationId = await createOrganization('Acme Inc');
 
-      await server()
+      await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           name: 'Referral drive',
@@ -266,7 +293,7 @@ describe('Organization + Campaign (e2e)', () => {
     it('rejects a campaign with a missing name', async () => {
       const organizationId = await createOrganization('Acme Inc');
 
-      await server()
+      await authenticatedServer()
         .post('/v1/campaigns')
         .send({
           startDate: '2026-01-01T00:00:00.000Z',
@@ -278,7 +305,7 @@ describe('Organization + Campaign (e2e)', () => {
 
     it('lists campaigns with an unambiguous link to their organization', async () => {
       const organizationId = await createOrganization('Acme Inc');
-      await server().post('/v1/campaigns').send({
+      await authenticatedServer().post('/v1/campaigns').send({
         name: 'Referral drive',
         startDate: '2026-01-01T00:00:00.000Z',
         endDate: '2026-01-31T00:00:00.000Z',

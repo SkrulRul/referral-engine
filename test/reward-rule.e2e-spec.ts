@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { startMigratedPostgresContainer } from './support/postgres-test-container';
+import { createAuthenticatedProgramAdmin } from './support/auth-test-helper';
 
 interface OrganizationResponseBody {
   id: string;
@@ -23,6 +24,7 @@ describe('RewardRule (e2e)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let accessToken: string;
 
   beforeAll(async () => {
     container = await startMigratedPostgresContainer();
@@ -46,7 +48,17 @@ describe('RewardRule (e2e)', () => {
     // organizations, all via onDelete: Restrict.
     await prisma.rewardRule.deleteMany();
     await prisma.campaign.deleteMany();
+    await prisma.programAdmin.deleteMany();
     await prisma.organization.deleteMany();
+
+    const authOrg = await prisma.organization.create({
+      data: { name: 'Auth Org' },
+    });
+    ({ accessToken } = await createAuthenticatedProgramAdmin(
+      app,
+      prisma,
+      authOrg.id,
+    ));
   });
 
   afterEach(async () => {
@@ -54,6 +66,11 @@ describe('RewardRule (e2e)', () => {
   });
 
   const server = () => request(app.getHttpServer());
+  const authenticatedServer = () =>
+    request
+      .agent(app.getHttpServer())
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Connection', 'close');
 
   async function createActiveCampaign(
     name = 'Referral drive',
@@ -65,7 +82,7 @@ describe('RewardRule (e2e)', () => {
     const organizationId = (organization.body as OrganizationResponseBody).id;
     const now = Date.now();
 
-    const response = await server()
+    const response = await authenticatedServer()
       .post('/v1/campaigns')
       .send({
         name,
@@ -82,7 +99,7 @@ describe('RewardRule (e2e)', () => {
     it('creates a fixed reward rule for an existing campaign', async () => {
       const campaign = await createActiveCampaign();
 
-      const created = await server()
+      const created = await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 50 })
         .expect(201);
@@ -98,7 +115,7 @@ describe('RewardRule (e2e)', () => {
     it('creates a percentage reward rule for an existing campaign', async () => {
       const campaign = await createActiveCampaign();
 
-      const created = await server()
+      const created = await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'percentage', value: 10 })
         .expect(201);
@@ -111,7 +128,7 @@ describe('RewardRule (e2e)', () => {
     });
 
     it('rejects a reward rule for a campaign that does not exist', async () => {
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({
           campaignId: '00000000-0000-0000-0000-000000000000',
@@ -123,12 +140,12 @@ describe('RewardRule (e2e)', () => {
 
     it('rejects a second reward rule for the same campaign', async () => {
       const campaign = await createActiveCampaign();
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 50 })
         .expect(201);
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 75 })
         .expect(409);
@@ -142,7 +159,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a negative fixed amount', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: -10 })
         .expect(400);
@@ -151,7 +168,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a zero fixed amount', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 0 })
         .expect(400);
@@ -160,7 +177,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a zero percentage', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'percentage', value: 0 })
         .expect(400);
@@ -169,7 +186,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a negative percentage', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'percentage', value: -5 })
         .expect(400);
@@ -178,7 +195,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a percentage over 100', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'percentage', value: 101 })
         .expect(400);
@@ -187,7 +204,7 @@ describe('RewardRule (e2e)', () => {
     it('accepts a percentage of exactly 100', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'percentage', value: 100 })
         .expect(201);
@@ -196,7 +213,7 @@ describe('RewardRule (e2e)', () => {
     it('rejects a value with more than 2 decimal places and creates no row', async () => {
       const campaign = await createActiveCampaign();
 
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 10.12346 })
         .expect(400);
@@ -210,7 +227,7 @@ describe('RewardRule (e2e)', () => {
     it('accepts a value with exactly 2 decimal places', async () => {
       const campaign = await createActiveCampaign();
 
-      const created = await server()
+      const created = await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 10.12 })
         .expect(201);
@@ -222,7 +239,7 @@ describe('RewardRule (e2e)', () => {
   describe('GET /v1/reward-rules/campaign/:campaignId', () => {
     it('retrieves an existing campaign reward rule', async () => {
       const campaign = await createActiveCampaign();
-      await server()
+      await authenticatedServer()
         .post('/v1/reward-rules')
         .send({ campaignId: campaign.id, type: 'fixed', value: 50 })
         .expect(201);

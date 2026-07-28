@@ -16,6 +16,8 @@ describe('HealthController (e2e)', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
     process.env.DATABASE_URL = container.getConnectionUri();
+    process.env.JWT_SECRET ??= 'test-jwt-secret-do-not-use-in-production';
+    process.env.JWT_EXPIRES_IN ??= '1h';
   }, 60_000);
 
   afterAll(async () => {

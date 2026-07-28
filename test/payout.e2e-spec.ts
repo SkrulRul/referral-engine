@@ -8,6 +8,7 @@ import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { PayoutService } from '../src/payout/payout.service';
 import { startMigratedPostgresContainer } from './support/postgres-test-container';
+import { createAuthenticatedProgramAdmin } from './support/auth-test-helper';
 
 interface OrganizationResponseBody {
   id: string;
@@ -47,10 +48,14 @@ async function cleanDatabase(prisma: PrismaService): Promise<void> {
   await prisma.referralCode.deleteMany();
   await prisma.rewardRule.deleteMany();
   await prisma.campaign.deleteMany();
+  await prisma.programAdmin.deleteMany();
   await prisma.organization.deleteMany();
 }
 
-function buildFixtures(server: () => ReturnType<typeof request>) {
+function buildFixtures(
+  server: () => ReturnType<typeof request>,
+  authenticatedServer: () => ReturnType<typeof request>,
+) {
   async function createActiveCampaign(
     name = 'Referral drive',
   ): Promise<CampaignResponseBody> {
@@ -61,7 +66,7 @@ function buildFixtures(server: () => ReturnType<typeof request>) {
     const organizationId = (organization.body as OrganizationResponseBody).id;
     const now = Date.now();
 
-    const response = await server()
+    const response = await authenticatedServer()
       .post('/v1/campaigns')
       .send({
         name,
@@ -78,7 +83,7 @@ function buildFixtures(server: () => ReturnType<typeof request>) {
     campaignId: string,
     value = 75,
   ): Promise<void> {
-    await server()
+    await authenticatedServer()
       .post('/v1/reward-rules')
       .send({ campaignId, type: 'fixed', value })
       .expect(201);
@@ -130,7 +135,9 @@ function buildFixtures(server: () => ReturnType<typeof request>) {
 
   async function createApprovedPayout(): Promise<string> {
     const payoutId = await createPendingPayout();
-    await server().patch(`/v1/payouts/${payoutId}/approve`).expect(200);
+    await authenticatedServer()
+      .patch(`/v1/payouts/${payoutId}/approve`)
+      .expect(200);
     return payoutId;
   }
 
@@ -151,6 +158,7 @@ describe('Payout (e2e)', () => {
   describe('shared app', () => {
     let app: INestApplication<App>;
     let prisma: PrismaService;
+    let accessToken: string;
 
     beforeEach(async () => {
       const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -163,6 +171,15 @@ describe('Payout (e2e)', () => {
 
       prisma = app.get(PrismaService);
       await cleanDatabase(prisma);
+
+      const authOrg = await prisma.organization.create({
+        data: { name: 'Auth Org' },
+      });
+      ({ accessToken } = await createAuthenticatedProgramAdmin(
+        app,
+        prisma,
+        authOrg.id,
+      ));
     });
 
     afterEach(async () => {
@@ -170,13 +187,18 @@ describe('Payout (e2e)', () => {
     });
 
     const server = () => request(app.getHttpServer());
-    const fixtures = buildFixtures(server);
+    const authenticatedServer = () =>
+      request
+        .agent(app.getHttpServer())
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Connection', 'close');
+    const fixtures = buildFixtures(server, authenticatedServer);
 
     describe('PATCH /v1/payouts/:id/approve', () => {
       it('approves a pending payout and records approvedAt', async () => {
         const payoutId = await fixtures.createPendingPayout();
 
-        const approved = await server()
+        const approved = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/approve`)
           .expect(200);
         const body = approved.body as PayoutResponseBody;
@@ -192,7 +214,7 @@ describe('Payout (e2e)', () => {
           .expect(200);
         const approvedAtBefore = (before.body as PayoutResponseBody).approvedAt;
 
-        const again = await server()
+        const again = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/approve`)
           .expect(200);
         const body = again.body as PayoutResponseBody;
@@ -203,9 +225,11 @@ describe('Payout (e2e)', () => {
 
       it('is a no-op with no destructive effect when approving an already-paid payout', async () => {
         const payoutId = await fixtures.createApprovedPayout();
-        await server().patch(`/v1/payouts/${payoutId}/pay`).expect(200);
+        await authenticatedServer()
+          .patch(`/v1/payouts/${payoutId}/pay`)
+          .expect(200);
 
-        const again = await server()
+        const again = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/approve`)
           .expect(200);
         const body = again.body as PayoutResponseBody;
@@ -214,13 +238,15 @@ describe('Payout (e2e)', () => {
       });
 
       it('returns 404 for a payout that does not exist', () => {
-        return server()
+        return authenticatedServer()
           .patch('/v1/payouts/00000000-0000-0000-0000-000000000000/approve')
           .expect(404);
       });
 
       it('returns 400 for a malformed (non-UUID) id', () => {
-        return server().patch('/v1/payouts/not-a-uuid/approve').expect(400);
+        return authenticatedServer()
+          .patch('/v1/payouts/not-a-uuid/approve')
+          .expect(400);
       });
     });
 
@@ -228,7 +254,7 @@ describe('Payout (e2e)', () => {
       it('pays an approved payout and records paidAt', async () => {
         const payoutId = await fixtures.createApprovedPayout();
 
-        const paid = await server()
+        const paid = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/pay`)
           .expect(200);
         const body = paid.body as PayoutResponseBody;
@@ -240,7 +266,7 @@ describe('Payout (e2e)', () => {
       it('is a no-op that leaves a still-pending payout unpaid', async () => {
         const payoutId = await fixtures.createPendingPayout();
 
-        const result = await server()
+        const result = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/pay`)
           .expect(200);
         const body = result.body as PayoutResponseBody;
@@ -251,12 +277,12 @@ describe('Payout (e2e)', () => {
 
       it('is an idempotent no-op when paying an already-paid payout', async () => {
         const payoutId = await fixtures.createApprovedPayout();
-        const first = await server()
+        const first = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/pay`)
           .expect(200);
         const paidAtBefore = (first.body as PayoutResponseBody).paidAt;
 
-        const second = await server()
+        const second = await authenticatedServer()
           .patch(`/v1/payouts/${payoutId}/pay`)
           .expect(200);
         const body = second.body as PayoutResponseBody;
@@ -266,13 +292,15 @@ describe('Payout (e2e)', () => {
       });
 
       it('returns 404 for a payout that does not exist', () => {
-        return server()
+        return authenticatedServer()
           .patch('/v1/payouts/00000000-0000-0000-0000-000000000000/pay')
           .expect(404);
       });
 
       it('returns 400 for a malformed (non-UUID) id', () => {
-        return server().patch('/v1/payouts/not-a-uuid/pay').expect(400);
+        return authenticatedServer()
+          .patch('/v1/payouts/not-a-uuid/pay')
+          .expect(400);
       });
     });
 
@@ -282,7 +310,7 @@ describe('Payout (e2e)', () => {
         const payoutService = app.get(PayoutService);
 
         const manualPayCalls = Array.from({ length: 5 }, () =>
-          server().patch(`/v1/payouts/${payoutId}/pay`),
+          authenticatedServer().patch(`/v1/payouts/${payoutId}/pay`),
         );
 
         const [manualPayResponses] = await Promise.all([
@@ -353,6 +381,7 @@ describe('Payout (e2e)', () => {
   describe('automatic sweep', () => {
     let app: INestApplication<App>;
     let originalIntervalEnv: string | undefined;
+    let accessToken: string;
 
     beforeAll(async () => {
       originalIntervalEnv = process.env.PAYOUT_SWEEP_INTERVAL_MS;
@@ -366,7 +395,17 @@ describe('Payout (e2e)', () => {
       configureApp(app);
       await app.init();
 
-      await cleanDatabase(app.get(PrismaService));
+      const prisma = app.get(PrismaService);
+      await cleanDatabase(prisma);
+
+      const authOrg = await prisma.organization.create({
+        data: { name: 'Auth Org' },
+      });
+      ({ accessToken } = await createAuthenticatedProgramAdmin(
+        app,
+        prisma,
+        authOrg.id,
+      ));
     }, 30_000);
 
     afterAll(async () => {
@@ -381,7 +420,12 @@ describe('Payout (e2e)', () => {
 
     it('marks an approved payout as paid automatically, without manual action', async () => {
       const server = () => request(app.getHttpServer());
-      const fixtures = buildFixtures(server);
+      const authenticatedServer = () =>
+        request
+          .agent(app.getHttpServer())
+          .set('Authorization', `Bearer ${accessToken}`)
+          .set('Connection', 'close');
+      const fixtures = buildFixtures(server, authenticatedServer);
       const payoutId = await fixtures.createApprovedPayout();
 
       const deadline = Date.now() + 10_000;

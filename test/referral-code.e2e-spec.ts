@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { startMigratedPostgresContainer } from './support/postgres-test-container';
+import { createAuthenticatedProgramAdmin } from './support/auth-test-helper';
 
 interface OrganizationResponseBody {
   id: string;
@@ -32,6 +33,7 @@ describe('ReferralCode (e2e)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let accessToken: string;
 
   beforeAll(async () => {
     container = await startMigratedPostgresContainer();
@@ -55,7 +57,17 @@ describe('ReferralCode (e2e)', () => {
     // organizations, both via onDelete: Restrict.
     await prisma.referralCode.deleteMany();
     await prisma.campaign.deleteMany();
+    await prisma.programAdmin.deleteMany();
     await prisma.organization.deleteMany();
+
+    const authOrg = await prisma.organization.create({
+      data: { name: 'Auth Org' },
+    });
+    ({ accessToken } = await createAuthenticatedProgramAdmin(
+      app,
+      prisma,
+      authOrg.id,
+    ));
   });
 
   afterEach(async () => {
@@ -63,6 +75,11 @@ describe('ReferralCode (e2e)', () => {
   });
 
   const server = () => request(app.getHttpServer());
+  const authenticatedServer = () =>
+    request
+      .agent(app.getHttpServer())
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Connection', 'close');
 
   async function createOrganization(name: string): Promise<string> {
     const response = await server()
@@ -83,7 +100,7 @@ describe('ReferralCode (e2e)', () => {
       endDate = new Date(now + 24 * 60 * 60 * 1000),
     } = options;
 
-    const response = await server()
+    const response = await authenticatedServer()
       .post('/v1/campaigns')
       .send({
         name,
