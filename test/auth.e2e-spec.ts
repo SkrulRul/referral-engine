@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -201,6 +202,39 @@ describe('Auth (e2e)', () => {
           organizationId,
         })
         .expect(401);
+    });
+  });
+
+  describe('expired token rejection', () => {
+    it('rejects a token that expired in the past with a 401 in the uniform error shape', async () => {
+      const { programAdminId } = await createAuthenticatedProgramAdmin(
+        app,
+        prisma,
+        organizationId,
+      );
+      const jwtService = app.get(JwtService);
+      const expiredToken = jwtService.sign(
+        { sub: programAdminId, organizationId },
+        { algorithm: 'HS256', expiresIn: -10 },
+      );
+
+      const response = await server()
+        .post('/v1/campaigns')
+        .set('Authorization', `Bearer ${expiredToken}`)
+        .send({
+          name: 'Referral drive',
+          startDate: '2026-01-01T00:00:00.000Z',
+          endDate: '2026-01-31T00:00:00.000Z',
+          organizationId,
+        })
+        .expect(401);
+
+      const body = response.body as ErrorResponseBody;
+      expect(body).toMatchObject({
+        statusCode: 401,
+        message: 'Invalid or expired authentication token',
+        error: 'Unauthorized',
+      });
     });
   });
 });
