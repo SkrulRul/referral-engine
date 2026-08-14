@@ -24,9 +24,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const httpException = this.toHttpException(exception);
 
+    const body = httpException.getResponse();
     httpAdapter.reply(
       response,
-      httpException.getResponse(),
+      typeof body === 'object' && body !== null
+        ? body
+        : { statusCode: httpException.getStatus(), message: body },
       httpException.getStatus(),
     );
   }
